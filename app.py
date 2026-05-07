@@ -5,7 +5,11 @@ import time
 from flask import Flask, render_template, jsonify
 from datetime import datetime
 
-app = Flask(__name__)
+# 核心修复：精准定位模板文件夹，适配云端和本地环境
+base_dir = os.path.dirname(os.path.abspath(__file__))
+template_dir = os.path.join(base_dir, 'templates')
+
+app = Flask(__name__, template_folder=template_dir)
 
 # 配置信息
 TOKEN = "M95GLnR"
@@ -40,7 +44,7 @@ def fetch_ranking():
     ]
     
     try:
-        # 先尝试访问主页获取 Cookie (如果需要)
+        # 先尝试访问主页获取 Cookie
         try:
             session.get("https://2323.weixin00pingxuan.vote520.cn/42/?art=M95GLnR&tab=3", headers={"User-Agent": HEADERS["User-Agent"]}, timeout=5)
         except:
@@ -49,7 +53,6 @@ def fetch_ranking():
         for group in groups:
             success = False
             last_err = ""
-            # 重试 2 次
             for attempt in range(2):
                 payload = {
                     "page": 1,
@@ -57,9 +60,7 @@ def fetch_ranking():
                     "group_id": group["id"]
                 }
                 try:
-                    print(f"[{datetime.now()}] Fetching {group['name']} (Attempt {attempt+1})...")
                     res = session.post(API_BASE + "rankingdata.html", headers=HEADERS, data=payload, timeout=15)
-                    
                     if res.status_code == 200:
                         result = res.json()
                         if "active" in result:
@@ -77,7 +78,6 @@ def fetch_ranking():
                                     "rank_in_group": item.get("rond")
                                 })
                             success = True
-                            print(f"  Successfully fetched {len(items)} items for {group['name']}")
                             break
                         else:
                             last_err = f"{group['name']} 返回数据为空"
@@ -85,26 +85,20 @@ def fetch_ranking():
                         last_err = f"API 返回状态码 {res.status_code}"
                 except Exception as e:
                     last_err = str(e)
-                    time.sleep(1) # 等待 1 秒后重试
+                    time.sleep(1)
             
             if not success:
                 cache["error_msg"] = f"抓取 {group['name']} 失败: {last_err}"
-                print(f"Error: {cache['error_msg']}")
                 return False, cache["error_msg"]
 
-        # 按票数全局排序
         all_players.sort(key=lambda x: int(x["votes"]) if x["votes"] else 0, reverse=True)
-        
-        # 更新缓存
         cache["data"] = all_players
         cache["last_updated"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         cache["active_name"] = active_name
         cache["error_msg"] = None
         return True, None
     except Exception as e:
-        err = f"系统错误: {str(e)}"
-        print(err)
-        return False, err
+        return False, str(e)
 
 @app.route('/')
 def index():
@@ -126,12 +120,7 @@ def refresh():
     })
 
 if __name__ == '__main__':
-    if not os.path.exists('templates'):
-        os.makedirs('templates')
-    
-    # 第一次运行先抓取数据
+    # 本地运行逻辑
     fetch_ranking()
-    
-    # 云端部署通常需要从环境变量获取端口
     port = int(os.environ.get('PORT', 5000))
     app.run(debug=True, host='0.0.0.0', port=port)
